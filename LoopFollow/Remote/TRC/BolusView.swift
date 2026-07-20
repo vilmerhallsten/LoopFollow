@@ -1,47 +1,104 @@
-//
-//  BolusView.swift
-//  LoopFollow
-//
-//  Created by Jonas Björkert on 2024-08-25.
-//  Copyright © 2024 Jon Fawcett. All rights reserved.
-//
+// LoopFollow
+// BolusView.swift
 
-import SwiftUI
 import HealthKit
 import LocalAuthentication
+import SwiftUI
 
 struct BolusView: View {
     @Environment(\.presentationMode) private var presentationMode
+
     @State private var bolusAmount = HKQuantity(unit: .internationalUnit(), doubleValue: 0.0)
-    private let pushNotificationManager = PushNotificationManager()
     @ObservedObject private var maxBolus = Storage.shared.maxBolus
+    @ObservedObject private var bolusIncrement = Storage.shared.bolusIncrement
+
+    @ObservedObject private var deviceRecBolus = Observable.shared.deviceRecBolus
+    @ObservedObject private var enactedOrSuggested = Observable.shared.enactedOrSuggested
+    @ObservedObject private var quickPickBoluses = QuickPickBolusesManager.shared
 
     @FocusState private var bolusFieldIsFocused: Bool
-
     @State private var showAlert = false
     @State private var alertType: AlertType? = nil
     @State private var alertMessage: String? = nil
     @State private var isLoading = false
     @State private var statusMessage: String? = nil
 
+    private let pushNotificationManager = PushNotificationManager()
+
     enum AlertType {
         case confirmBolus
         case statusSuccess
         case statusFailure
         case validation
+        case oldCalculationWarning
     }
+
+    // MARK: - Step/precision helpers driven by stored increment
+
+    private var stepU: Double {
+        max(0.001, bolusIncrement.value.doubleValue(for: .internationalUnit()))
+    }
+
+    private var stepFractionDigits: Int {
+        let inc = stepU
+        if inc >= 1 { return 0 }
+        var v = inc
+        var digits = 0
+        while digits < 6 && abs(round(v) - v) > 1e-10 {
+            v *= 10; digits += 1
+        }
+        return min(max(digits, 0), 5)
+    }
+
+    private func roundedToStep(_ value: Double) -> Double {
+        guard stepU > 0 else { return value }
+
+        let epsilon = 1e-10
+        let stepped = ((value / stepU) + epsilon).rounded(.down) * stepU
+
+        let p = pow(10.0, Double(stepFractionDigits))
+        return (stepped * p).rounded() / p
+    }
+
+    // MARK: - View
 
     var body: some View {
         NavigationView {
-            VStack {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
                 Form {
+                    recommendedBlocks(now: context.date)
+
+                    if !quickPickBoluses.quickPickBoluses.isEmpty {
+                        Section(header: QuickPickSectionHeader(title: "Quick-Pick Boluses", infoText: QuickPickSectionHeader.bolusInfoText)) {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(quickPickBoluses.quickPickBoluses) { bolus in
+                                        Button {
+                                            applyQuickPickBolus(bolus.units)
+                                        } label: {
+                                            Text("\(InsulinFormatter.shared.string(bolus.units))U")
+                                                .font(.subheadline.weight(.medium))
+                                                .padding(.horizontal, 14)
+                                                .padding(.vertical, 8)
+                                                .background(Color.accentColor.opacity(0.15))
+                                                .foregroundColor(.accentColor)
+                                                .cornerRadius(8)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    }
+
                     Section {
                         HKQuantityInputView(
                             label: "Bolus Amount",
                             quantity: $bolusAmount,
                             unit: .internationalUnit(),
-                            maxLength: 4,
-                            minValue: HKQuantity(unit: .internationalUnit(), doubleValue: 0.05),
+                            maxLength: 5,
+                            minValue: HKQuantity(unit: .internationalUnit(), doubleValue: 0),
                             maxValue: maxBolus.value,
                             isFocused: $bolusFieldIsFocused,
                             onValidationError: { message in
@@ -49,36 +106,73 @@ struct BolusView: View {
                             }
                         )
                     }
+                }
+                .safeAreaInset(edge: .bottom) {
+                    Button {
+                        bolusFieldIsFocused = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            let rawValue = self.bolusAmount.doubleValue(for: .internationalUnit())
+                            let steppedAmount = roundedToStep(rawValue)
 
-                    LoadingButtonView(
-                        buttonText: "Send Bolus",
-                        progressText: "Sending Bolus...",
-                        isLoading: isLoading,
-                        action: {
-                            bolusFieldIsFocused = false
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                if bolusAmount.doubleValue(for: HKUnit.internationalUnit()) > 0.0 {
-                                    alertType = .confirmBolus
-                                    showAlert = true
-                                }
+                            if steppedAmount > 0 {
+                                bolusAmount = HKQuantity(unit: .internationalUnit(), doubleValue: steppedAmount)
+                                alertType = .confirmBolus
+                                showAlert = true
                             }
-                        },
-                        isDisabled: isLoading
-                    )
+                        }
+                    } label: {
+                        if isLoading {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Sending Bolus...")
+                            }
+                            .frame(maxWidth: .infinity)
+                        } else {
+                            Text("Send Bolus")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(isLoading)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(.bar)
                 }
                 .navigationTitle("Bolus")
                 .navigationBarTitleDisplayMode(.inline)
+            }
+            .onAppear {
+                quickPickBoluses.refresh(
+                    stepIncrement: stepU,
+                    maxBolus: maxBolus.value.doubleValue(for: .internationalUnit())
+                )
             }
             .alert(isPresented: $showAlert) {
                 switch alertType {
                 case .confirmBolus:
                     return Alert(
                         title: Text("Confirm Bolus"),
-                        message: Text("Are you sure you want to send \(bolusAmount.doubleValue(for: HKUnit.internationalUnit()), specifier: "%.2f") U?"),
+                        message: Text("Are you sure you want to send \(InsulinFormatter.shared.string(bolusAmount)) U?"),
                         primaryButton: .default(Text("Confirm"), action: {
-                            authenticateUser { success in
-                                if success {
-                                    sendBolus()
+                            AuthService.authenticate(reason: "Confirm your identity to send bolus.") { result in
+                                DispatchQueue.main.async {
+                                    switch result {
+                                    case .success:
+                                        self.sendBolus()
+                                    case let .unavailable(message):
+                                        self.alertMessage = message
+                                        self.alertType = .validation
+                                        self.showAlert = true
+                                    case .failed:
+                                        self.alertMessage = "Authentication failed"
+                                        self.alertType = .validation
+                                        self.showAlert = true
+                                    case .canceled:
+                                        // User canceled, no alert
+                                        break
+                                    }
                                 }
                             }
                         }),
@@ -104,6 +198,17 @@ struct BolusView: View {
                         message: Text(alertMessage ?? "Invalid input."),
                         dismissButton: .default(Text("OK"))
                     )
+                case .oldCalculationWarning:
+                    return Alert(
+                        title: Text("Old Calculation Warning"),
+                        message: Text(alertMessage ?? ""),
+                        primaryButton: .default(Text("Use Anyway")) {
+                            if let rec = deviceRecBolus.value {
+                                applyRecommendedBolus(rec)
+                            }
+                        },
+                        secondaryButton: .cancel()
+                    )
                 case .none:
                     return Alert(title: Text("Unknown Alert"))
                 }
@@ -111,48 +216,128 @@ struct BolusView: View {
         }
     }
 
+    // MARK: - Recommended bolus UI
+
+    @ViewBuilder
+    private func recommendedBlocks(now: Date) -> some View {
+        if let rec = deviceRecBolus.value,
+           let t = enactedOrSuggested.value
+        {
+            let ageSec = max(0, now.timeIntervalSince1970 - t)
+
+            if ageSec < 12 * 60 {
+                let maxU = maxBolus.value.doubleValue(for: .internationalUnit())
+                let clamped = min(rec, maxU)
+                let steppedRec = roundedToStep(clamped)
+
+                if steppedRec > 0 {
+                    let mins = Int(ageSec / 60)
+                    let isStale5 = ageSec >= 5 * 60
+
+                    Section(header: Text("Recommended Bolus")) {
+                        Button {
+                            handleRecommendedBolusTap(rec: steppedRec, ageSec: ageSec)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("\(InsulinFormatter.shared.string(steppedRec))U")
+                                    Text("Calculated \(mins) minute\(mins == 1 ? "" : "s") ago")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.up.circle.fill")
+                                    .font(.title2)
+                            }
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+
+                    Section {
+                        let color: Color = isStale5 ? .red : .yellow
+                        Text("WARNING: New treatments may have occurred since the last recommended bolus was calculated \(presentableMinutesFormat(timeInterval: ageSec)) ago.")
+                            .font(.callout)
+                            .foregroundColor(color)
+                            .multilineTextAlignment(.leading)
+                    }
+
+                } else {
+                    EmptyView()
+                }
+
+            } else {
+                EmptyView()
+            }
+
+        } else {
+            EmptyView()
+        }
+    }
+
+    private func handleRecommendedBolusTap(rec: Double, ageSec: TimeInterval) {
+        let isStale5 = ageSec >= 5 * 60
+        let isStale12 = ageSec >= 12 * 60
+        if isStale12 { return }
+        if isStale5 {
+            let mins = Int(ageSec / 60)
+            alertMessage = "This recommended bolus was calculated \(mins) minutes ago. New treatments may have occurred since then. Proceed with caution."
+            alertType = .oldCalculationWarning
+            showAlert = true
+        } else {
+            applyRecommendedBolus(rec)
+        }
+    }
+
+    private func applyQuickPickBolus(_ units: Double) {
+        let maxU = maxBolus.value.doubleValue(for: .internationalUnit())
+        let clamped = min(units, maxU)
+        let stepped = roundedToStep(clamped)
+        bolusAmount = HKQuantity(unit: .internationalUnit(), doubleValue: stepped)
+    }
+
+    private func applyRecommendedBolus(_ rec: Double) {
+        let maxU = maxBolus.value.doubleValue(for: .internationalUnit())
+        let clamped = min(rec, maxU)
+        let stepped = roundedToStep(clamped)
+        bolusAmount = HKQuantity(unit: .internationalUnit(), doubleValue: stepped)
+    }
+
+    private func presentableMinutesFormat(timeInterval: TimeInterval) -> String {
+        let minutes = max(0, Int(timeInterval / 60))
+        var s = "\(minutes) minute"
+        if minutes == 0 || minutes > 1 { s += "s" }
+        return s
+    }
+
+    // MARK: - Send
+
     private func sendBolus() {
         isLoading = true
-
         pushNotificationManager.sendBolusPushNotification(bolusAmount: bolusAmount) { success, errorMessage in
             DispatchQueue.main.async {
                 isLoading = false
                 if success {
+                    let sentUnits = bolusAmount.doubleValue(for: .internationalUnit())
+                    if sentUnits > 0 {
+                        QuickPickBolusesManager.shared.recordBolus(units: sentUnits)
+                    }
                     statusMessage = "Bolus command sent successfully."
-                    LogManager.shared.log(category: .apns, message: "sendBolusPushNotification succeeded - Bolus: \(bolusAmount.doubleValue(for: .internationalUnit())) U")
+                    LogManager.shared.log(
+                        category: .apns,
+                        message: "sendBolusPushNotification succeeded - Bolus: \(InsulinFormatter.shared.string(bolusAmount)) U"
+                    )
                     bolusAmount = HKQuantity(unit: .internationalUnit(), doubleValue: 0.0)
                     alertType = .statusSuccess
                 } else {
                     statusMessage = errorMessage ?? "Failed to send bolus command."
-                    LogManager.shared.log(category: .apns, message: "sendBolusPushNotification failed with error: \(errorMessage ?? "unknown error")")
+                    LogManager.shared.log(
+                        category: .apns,
+                        message: "sendBolusPushNotification failed with error: \(errorMessage ?? "unknown error")"
+                    )
                     alertType = .statusFailure
                 }
                 showAlert = true
-            }
-        }
-    }
-
-    private func authenticateUser(completion: @escaping (Bool) -> Void) {
-        let context = LAContext()
-        var error: NSError?
-
-        let reason = "Confirm your identity to send bolus."
-
-        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
-            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, _ in
-                DispatchQueue.main.async {
-                    completion(success)
-                }
-            }
-        } else if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
-            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, _ in
-                DispatchQueue.main.async {
-                    completion(success)
-                }
-            }
-        } else {
-            DispatchQueue.main.async {
-                completion(false)
             }
         }
     }

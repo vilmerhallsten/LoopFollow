@@ -1,14 +1,13 @@
-//
-//  GlucoseConversion.swift
-//  LoopFollow
-//
-//  Created by Jonas Björkert on 2024-04-28.
-//  Copyright © 2024 Jon Fawcett. All rights reserved.
-//
+// LoopFollow
+// GlucoseConversion.swift
 
 import Foundation
 
-struct GlucoseConversion {
-    static let mgDlToMmolL: Double = 0.0555
+enum GlucoseConversion {
     static let mmolToMgDl: Double = 18.01559
+    static let mgDlToMmolL: Double = 1.0 / mmolToMgDl
+
+    static func toMmol(_ mgdl: Double) -> Double {
+        mgdl * mgDlToMmolL
+    }
 }

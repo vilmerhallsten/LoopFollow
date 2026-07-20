@@ -1,0 +1,165 @@
+// LoopFollow
+// GeneralSettingsView.swift
+
+import SwiftUI
+
+struct GeneralSettingsView: View {
+    @ObservedObject var colorBGText = Storage.shared.colorBGText
+    @ObservedObject var appBadge = Storage.shared.appBadge
+    @ObservedObject var appearanceMode = Storage.shared.appearanceMode
+    @ObservedObject var showStats = Storage.shared.showStats
+    @ObservedObject var showSmallGraph = Storage.shared.showSmallGraph
+    @ObservedObject var screenlockSwitchState = Storage.shared.screenlockSwitchState
+    @ObservedObject var showDisplayName = Storage.shared.showDisplayName
+    @ObservedObject var snoozerEmoji = Storage.shared.snoozerEmoji
+    @ObservedObject var forcePortraitMode = Storage.shared.forcePortraitMode
+    @ObservedObject var persistentNotification = Storage.shared.persistentNotification
+    @ObservedObject var graphTimeZoneEnabled = Storage.shared.graphTimeZoneEnabled
+    @ObservedObject var graphTimeZoneIdentifier = Storage.shared.graphTimeZoneIdentifier
+
+    // Speak-BG settings
+    @ObservedObject var speakBG = Storage.shared.speakBG
+    @ObservedObject var speakBGAlways = Storage.shared.speakBGAlways
+    @ObservedObject var speakLanguage = Storage.shared.speakLanguage
+    @ObservedObject var speakLowBG = Storage.shared.speakLowBG
+    @ObservedObject var speakProactiveLowBG = Storage.shared.speakProactiveLowBG
+    @ObservedObject var speakLowBGLimit = Storage.shared.speakLowBGLimit
+    @ObservedObject var speakFastDropDelta = Storage.shared.speakFastDropDelta
+    @ObservedObject var speakHighBG = Storage.shared.speakHighBG
+    @ObservedObject var speakHighBGLimit = Storage.shared.speakHighBGLimit
+
+    // Telemetry — see LoopFollow/Helpers/Telemetry.swift
+    @ObservedObject var telemetryEnabled = Storage.shared.telemetryEnabled
+
+    var body: some View {
+        Form {
+            Section("App Settings") {
+                Toggle("Display App Badge", isOn: $appBadge.value)
+                Toggle("Persistent Notification", isOn: $persistentNotification.value)
+            }
+
+            Section("Display") {
+                Picker("Appearance", selection: $appearanceMode.value) {
+                    ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                Toggle("Display Stats", isOn: $showStats.value)
+                Toggle("Display Small Graph", isOn: $showSmallGraph.value)
+                Toggle("Color BG Text", isOn: $colorBGText.value)
+                Toggle("Keep Screen Active", isOn: $screenlockSwitchState.value)
+                Toggle("Show Display Name", isOn: $showDisplayName.value)
+                Toggle("Snoozer emoji", isOn: $snoozerEmoji.value)
+                Toggle("Force portrait mode", isOn: $forcePortraitMode.value)
+                    .onChange(of: forcePortraitMode.value) { _ in
+                        let window = UIApplication.shared.connectedScenes
+                            .compactMap { $0 as? UIWindowScene }
+                            .flatMap { $0.windows }
+                            .first
+
+                        window?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+                    }
+            }
+
+            Section("Time Zone") {
+                Toggle("Time Zone Override", isOn: $graphTimeZoneEnabled.value)
+                    .onChange(of: graphTimeZoneEnabled.value) { _ in markChartSettingsDirty() }
+
+                if graphTimeZoneEnabled.value {
+                    Picker("Time Zone", selection: $graphTimeZoneIdentifier.value) {
+                        ForEach(Self.sortedTimeZones, id: \.identifier) { tz in
+                            Text(Self.timeZoneLabel(tz)).tag(tz.identifier)
+                        }
+                    }
+                    .onChange(of: graphTimeZoneIdentifier.value) { _ in markChartSettingsDirty() }
+                }
+            }
+
+            Section("Speak BG") {
+                Toggle("Speak BG", isOn: $speakBG.value.animation())
+
+                if speakBG.value {
+                    Picker("Language", selection: $speakLanguage.value) {
+                        Text("English").tag("en")
+                        Text("French").tag("fr")
+                        Text("Italian").tag("it")
+                        Text("Slovak").tag("sk")
+                        Text("Swedish").tag("sv")
+                    }
+
+                    Toggle("Always", isOn: $speakBGAlways.value.animation())
+
+                    if !speakBGAlways.value {
+                        Toggle("Low", isOn: $speakLowBG.value.animation())
+                            .onChange(of: speakLowBG.value) { newValue in
+                                if newValue {
+                                    speakProactiveLowBG.value = false
+                                }
+                            }
+
+                        Toggle("Proactive Low", isOn: $speakProactiveLowBG.value.animation())
+                            .onChange(of: speakProactiveLowBG.value) { newValue in
+                                if newValue {
+                                    speakLowBG.value = false
+                                }
+                            }
+
+                        if speakLowBG.value || speakProactiveLowBG.value {
+                            BGPicker(
+                                title: "Low BG Limit",
+                                range: 40 ... 108,
+                                value: $speakLowBGLimit.value
+                            )
+                        }
+
+                        if speakProactiveLowBG.value {
+                            BGPicker(
+                                title: "Fast Drop Delta",
+                                range: 3 ... 20,
+                                value: $speakFastDropDelta.value
+                            )
+                        }
+
+                        Toggle("High", isOn: $speakHighBG.value.animation())
+
+                        if speakHighBG.value {
+                            BGPicker(
+                                title: "High BG Limit",
+                                range: 140 ... 300,
+                                value: $speakHighBGLimit.value
+                            )
+                        }
+                    }
+                }
+            }
+
+            Section("Diagnostics") {
+                Toggle("Send anonymous usage stats", isOn: $telemetryEnabled.value)
+                    .onChange(of: telemetryEnabled.value) { newValue in
+                        if newValue {
+                            TelemetryClient.shared.scheduleRecurring()
+                        }
+                    }
+                NavigationLink("What's sent") { TelemetryPreviewView() }
+                NavigationLink("Privacy") { TelemetryPrivacyView() }
+            }
+        }
+        .preferredColorScheme(Storage.shared.appearanceMode.value.colorScheme)
+        .navigationBarTitle("General Settings", displayMode: .inline)
+    }
+
+    private func markChartSettingsDirty() {
+        Observable.shared.chartSettingsChanged.value = true
+    }
+
+    private static let sortedTimeZones: [TimeZone] = TimeZone.knownTimeZoneIdentifiers
+        .compactMap { TimeZone(identifier: $0) }
+        .sorted { $0.secondsFromGMT() < $1.secondsFromGMT() }
+
+    private static func timeZoneLabel(_ tz: TimeZone) -> String {
+        let offsetMinutes = tz.secondsFromGMT() / 60
+        let sign = offsetMinutes >= 0 ? "+" : "-"
+        let offsetString = String(format: "UTC%@%02d:%02d", sign, abs(offsetMinutes) / 60, abs(offsetMinutes) % 60)
+        return "(\(offsetString)) \(tz.identifier)"
+    }
+}

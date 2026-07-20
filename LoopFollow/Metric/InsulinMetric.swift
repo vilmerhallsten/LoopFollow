@@ -1,10 +1,5 @@
-//
-//  InsulinMetric.swift
-//  LoopFollow
-//
-//  Created by Jonas Björkert on 2024-07-17.
-//  Copyright © 2024 Jon Fawcett. All rights reserved.
-//
+// LoopFollow
+// InsulinMetric.swift
 
 import Foundation
 
@@ -21,5 +16,10 @@ class InsulinMetric: Metric {
             return nil
         }
         super.init(value: value, maxFractionDigits: 2, minFractionDigits: 0)
+    }
+
+    override func formattedValue() -> String {
+        let decimals = abs(value) >= 10 ? 0 : 1
+        return Localizer.formatToLocalizedString(value, maxFractionDigits: decimals, minFractionDigits: 0)
     }
 }

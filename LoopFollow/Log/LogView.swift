@@ -1,16 +1,11 @@
-//
-//  LogView.swift
-//  LoopFollow
-//
-//  Created by Jonas Björkert on 2025-01-13.
-//  Copyright © 2025 Jon Fawcett. All rights reserved.
-//
+// LoopFollow
+// LogView.swift
 
 import SwiftUI
 
 struct LogView: View {
+    var onBack: (() -> Void)?
     @ObservedObject var viewModel = LogViewModel()
-    @Environment(\.presentationMode) var presentationMode
 
     var body: some View {
         NavigationView {
@@ -38,17 +33,20 @@ struct LogView: View {
                     .padding(.horizontal)
                 }
             }
-            .navigationBarTitle("Today's Logs", displayMode: .inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-            }
             .onAppear {
                 viewModel.loadLogEntries()
             }
+            .navigationBarTitle("Today's Logs", displayMode: .inline)
+            .toolbar {
+                if let onBack {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(action: onBack) {
+                            Image(systemName: "chevron.left")
+                        }
+                    }
+                }
+            }
         }
+        .preferredColorScheme(Storage.shared.appearanceMode.value.colorScheme)
     }
 }

@@ -1,0 +1,207 @@
+// LoopFollow
+// SettingsMenuView.swift
+
+import SwiftUI
+import UIKit
+
+struct SettingsMenuView: View {
+    @ObservedObject private var nightscoutURL = Storage.shared.url
+
+    var body: some View {
+        List {
+            dataSection
+
+            Section("Display Settings") {
+                NavigationRow(title: "General",
+                              icon: "gearshape",
+                              value: SettingsRoute.general)
+                NavigationRow(title: "Graph",
+                              icon: "chart.xyaxis.line",
+                              value: SettingsRoute.graph)
+
+                if !nightscoutURL.value.isEmpty {
+                    NavigationRow(title: "Information Display",
+                                  icon: "info.circle",
+                                  value: SettingsRoute.infoDisplay)
+                }
+
+                NavigationRow(title: "Units and Metrics",
+                              icon: "scalemass",
+                              value: SettingsRoute.units)
+
+                NavigationRow(title: "Tabs",
+                              icon: "rectangle.3.group",
+                              value: SettingsRoute.tabSettings)
+            }
+
+            Section("App Settings") {
+                NavigationRow(title: "Background Refresh",
+                              icon: "arrow.clockwise",
+                              value: SettingsRoute.backgroundRefresh)
+
+                NavigationRow(title: "Import/Export",
+                              icon: "square.and.arrow.down",
+                              value: SettingsRoute.importExport)
+
+                NavigationRow(title: "APN",
+                              icon: "bell.and.waves.left.and.right",
+                              value: SettingsRoute.apn)
+
+                #if !targetEnvironment(macCatalyst)
+                    NavigationRow(title: "Live Activity",
+                                  icon: "dot.radiowaves.left.and.right",
+                                  value: SettingsRoute.liveActivity)
+                #endif
+
+                if !nightscoutURL.value.isEmpty {
+                    NavigationRow(title: "Remote",
+                                  icon: "antenna.radiowaves.left.and.right",
+                                  value: SettingsRoute.remote)
+                }
+            }
+
+            Section("Alarms") {
+                NavigationRow(title: "Alarms",
+                              icon: "bell.badge",
+                              value: SettingsRoute.alarmSettings)
+            }
+
+            Section("Integrations") {
+                NavigationRow(title: "Calendar",
+                              icon: "calendar",
+                              value: SettingsRoute.calendar)
+
+                NavigationRow(title: "Contact",
+                              icon: "person.circle",
+                              value: SettingsRoute.contact)
+            }
+
+            Section("Advanced Settings") {
+                NavigationRow(title: "Advanced",
+                              icon: "exclamationmark.shield",
+                              value: SettingsRoute.advanced)
+            }
+        }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.large)
+    }
+
+    // MARK: – Section builders
+
+    @ViewBuilder
+    private var dataSection: some View {
+        Section("Data Settings") {
+            NavigationRow(title: "Nightscout",
+                          icon: "network",
+                          value: SettingsRoute.nightscout)
+
+            NavigationRow(title: "Dexcom",
+                          icon: "sensor.tag.radiowaves.forward",
+                          value: SettingsRoute.dexcom)
+        }
+    }
+}
+
+// MARK: – Sheet routing
+
+enum SettingsRoute: Hashable, Identifiable {
+    case settings
+    case units
+    case nightscout, dexcom
+    case backgroundRefresh
+    case general, graph
+    case tabSettings
+    case infoDisplay
+    case alarmSettings
+    case apn
+    #if !targetEnvironment(macCatalyst)
+        case liveActivity
+    #endif
+    case remote
+    case importExport
+    case calendar, contact
+    case advanced
+    case aggregatedStats
+
+    var id: Self { self }
+
+    @ViewBuilder
+    var destination: some View {
+        switch self {
+        case .settings: SettingsMenuView()
+        case .units: UnitsSettingsView()
+        case .nightscout: NightscoutSettingsView(viewModel: .init())
+        case .dexcom: DexcomSettingsView(viewModel: .init())
+        case .backgroundRefresh: BackgroundRefreshSettingsView(viewModel: .init())
+        case .general: GeneralSettingsView()
+        case .graph: GraphSettingsView()
+        case .tabSettings: TabCustomizationModal()
+        case .infoDisplay: InfoDisplaySettingsView(viewModel: .init())
+        case .alarmSettings: AlarmSettingsView()
+        case .apn: APNSettingsView()
+        #if !targetEnvironment(macCatalyst)
+            case .liveActivity: LiveActivitySettingsView()
+        #endif
+        case .remote: RemoteSettingsView(viewModel: .init())
+        case .importExport: ImportExportSettingsView()
+        case .calendar: CalendarSettingsView()
+        case .contact: ContactSettingsView(viewModel: .init())
+        case .advanced: AdvancedSettingsView(viewModel: .init())
+        case .aggregatedStats:
+            AggregatedStatsViewWrapper()
+        }
+    }
+}
+
+// Helper view to access MainViewController
+struct AggregatedStatsViewWrapper: View {
+    @State private var mainViewController: MainViewController?
+
+    var body: some View {
+        Group {
+            if let mainVC = mainViewController {
+                AggregatedStatsContentView(mainViewController: mainVC)
+            } else {
+                Text("Loading stats...")
+                    .onAppear {
+                        mainViewController = getMainViewController()
+                    }
+            }
+        }
+    }
+
+    private func getMainViewController() -> MainViewController? {
+        MainViewController.shared
+    }
+}
+
+// MARK: – UIKit helpers (unchanged)
+
+import UIKit
+
+extension UIApplication {
+    var topMost: UIViewController? {
+        // `keyWindow` is deprecated and returns nil on Mac Catalyst / multi-window iPad.
+        // Walk connected scenes instead and prefer the foreground-active one.
+        let windowScenes = connectedScenes.compactMap { $0 as? UIWindowScene }
+        let activeScene = windowScenes.first { $0.activationState == .foregroundActive }
+            ?? windowScenes.first
+        let rootVC = activeScene?.windows.first(where: \.isKeyWindow)?.rootViewController
+            ?? activeScene?.windows.first?.rootViewController
+        guard var top = rootVC else { return nil }
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+        return top
+    }
+}
+
+extension UIViewController {
+    func presentSimpleAlert(title: String, message: String) {
+        let a = UIAlertController(title: title,
+                                  message: message,
+                                  preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: "OK", style: .default))
+        present(a, animated: true)
+    }
+}

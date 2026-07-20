@@ -1,16 +1,28 @@
-//
-//  DateTime.swift
-//  LoopFollow
-//
-//  Created by Jon Fawcett on 6/16/20.
-//  Copyright © 2020 Jon Fawcett. All rights reserved.
-//
+// LoopFollow
+// DateTime.swift
 
 import Foundation
 
-
 class dateTimeUtils {
-    
+    static func displayTimeZone() -> TimeZone {
+        if Storage.shared.graphTimeZoneEnabled.value,
+           let tz = TimeZone(identifier: Storage.shared.graphTimeZoneIdentifier.value)
+        {
+            return tz
+        }
+        return .current
+    }
+
+    static func displayCalendar() -> Calendar {
+        var calendar = Calendar.current
+        calendar.timeZone = displayTimeZone()
+        return calendar
+    }
+
+    static func applyDisplayTimeZone(to formatter: DateFormatter) {
+        formatter.timeZone = displayTimeZone()
+    }
+
     static func getTimeIntervalMidnightToday() -> TimeInterval {
         let now = Date()
         let formatter = DateFormatter()
@@ -24,7 +36,7 @@ class dateTimeUtils {
         guard let midnightTimeInterval = newDate?.timeIntervalSince1970 else { return 0 }
         return midnightTimeInterval
     }
-    
+
     static func getTimeIntervalMidnightYesterday() -> TimeInterval {
         let now = Date().addingTimeInterval(-86400)
         let formatter = DateFormatter()
@@ -38,13 +50,13 @@ class dateTimeUtils {
         guard let midnightTimeInterval = newDate?.timeIntervalSince1970 else { return 0 }
         return midnightTimeInterval
     }
-    
+
     static func getTimeIntervalNHoursAgo(N: Int) -> TimeInterval {
         let today = Date()
         let nHoursAgo = Calendar.current.date(byAdding: .hour, value: -N, to: today)!
         return nHoursAgo.timeIntervalSince1970
     }
-    
+
     static func getNowTimeIntervalUTC() -> TimeInterval {
         let now = Date()
         let formatter = DateFormatter()
@@ -56,24 +68,28 @@ class dateTimeUtils {
         guard let utcTime = day?.timeIntervalSince1970 else { return 0 }
         return utcTime
     }
-    
-    static func getDateTimeString(addingHours hours: Int? = nil, addingDays days: Int? = nil) -> String {
+
+    static func getDateTimeString(addingMinutes minutes: Int? = nil, addingHours hours: Int? = nil, addingDays days: Int? = nil) -> String {
         let currentDate = Date()
         var date = currentDate
-        
+
+        if let minutesToAdd = minutes {
+            date = Calendar.current.date(byAdding: .minute, value: minutesToAdd, to: date)!
+        }
+
         if let hoursToAdd = hours {
-            date = Calendar.current.date(byAdding: .hour, value: hoursToAdd, to: currentDate)!
+            date = Calendar.current.date(byAdding: .hour, value: hoursToAdd, to: date)!
         }
-        
+
         if let daysToAdd = days {
-            date = Calendar.current.date(byAdding: .day, value: daysToAdd, to: currentDate)!
+            date = Calendar.current.date(byAdding: .day, value: daysToAdd, to: date)!
         }
-        
+
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         dateFormatter.locale = Locale(identifier: "en_US")
         dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-        
+
         return dateFormatter.string(from: date)
     }
 
@@ -84,7 +100,7 @@ class dateTimeUtils {
         formatter.locale = Locale(identifier: "en_US")
         return formatter.string(from: date)
     }
-    
+
     static func is24Hour() -> Bool {
         let dateFormat = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: Locale.current)!
 

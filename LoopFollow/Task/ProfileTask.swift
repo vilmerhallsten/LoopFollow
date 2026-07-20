@@ -1,10 +1,5 @@
-//
-//  ProfileTask.swift
-//  LoopFollow
-//
-//  Created by Jonas Björkert on 2025-01-11.
-//  Copyright © 2025 Jon Fawcett. All rights reserved.
-//
+// LoopFollow
+// ProfileTask.swift
 
 import Foundation
 
@@ -24,8 +19,12 @@ extension MainViewController {
             return
         }
 
-        self.webLoadNSProfile()
+        webLoadNSProfile()
 
-        TaskScheduler.shared.rescheduleTask(id: .profile, to: Date().addingTimeInterval(10 * 60))
+        var interval: TimeInterval = 10 * 60
+        if NightscoutSocketManager.shared.connectionState == .authenticated {
+            interval = 30 * 60
+        }
+        TaskScheduler.shared.rescheduleTask(id: .profile, to: Date().addingTimeInterval(interval))
     }
 }
